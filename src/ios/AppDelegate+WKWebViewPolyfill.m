@@ -76,16 +76,21 @@ NSString* appDataFolder;
                      requestClass:[GCDWebServerRequest class]
                      processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
                        NSString *fileLocation = request.URL.path;
+                       GCDWebServerResponse* response = nil;
+
                        if ([fileLocation hasPrefix:path]) {
                          fileLocation = [appDataFolder stringByAppendingString:request.URL.path];
                        }
-                       
+
                        fileLocation = [fileLocation stringByReplacingOccurrencesOfString:FileSchemaConstant withString:@""];
                        if (![[NSFileManager defaultManager] fileExistsAtPath:fileLocation]) {
                            return nil;
                        }
-                         
-                       return [GCDWebServerFileResponse responseWithFile:fileLocation];
+
+                       response = [GCDWebServerFileResponse responseWithFile:fileLocation byteRange:request.byteRange];
+                       [response setValue:@"bytes" forAdditionalHeader:@"Accept-Ranges"];
+
+                       return response;
                      }
    ];
 }
