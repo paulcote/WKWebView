@@ -41,29 +41,29 @@ NSString* appDataFolder;
     [self.window makeKeyAndVisible];
     appDataFolder = [[NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) objectAtIndex:0] stringByDeletingLastPathComponent];
 
-    // webserver no longer needed for iOS 9, yay!
-    if (!IsAtLeastiOSVersion(@"9.0")) {
-      // Initialize Server environment variables
-      NSString *directoryPath = myMainViewController.wwwFolderName;
-      _webServer = [[GCDWebServer alloc] init];
-      _webServerOptions = [NSMutableDictionary dictionary];
+    // Note: the embedded webserver is still needed for iOS 9. It's not needed to load index.html,
+    //       but we need it to ajax-load files (file:// protocol has no origin, leading to CORS issues).
+    NSString *directoryPath = myMainViewController.wwwFolderName;
+    _webServer = [[GCDWebServer alloc] init];
+    _webServerOptions = [NSMutableDictionary dictionary];
 
-      // Add GET handler for local "www/" directory
-      [_webServer addGETHandlerForBasePath:@"/"
-                             directoryPath:directoryPath
-                             indexFilename:nil
-                                  cacheAge:60
-                        allowRangeRequests:YES];
+    // Add GET handler for local "www/" directory
+    [_webServer addGETHandlerForBasePath:@"/"
+                           directoryPath:directoryPath
+                           indexFilename:nil
+                                cacheAge:30
+                      allowRangeRequests:YES];
 
-      [[NSNotificationCenter defaultCenter] postNotificationName:ServerCreatedNotificationName object: @[myMainViewController, _webServer]];
+    [[NSNotificationCenter defaultCenter] postNotificationName:ServerCreatedNotificationName object: @[myMainViewController, _webServer]];
 
-      [self addHandlerForPath:@"/Library/"];
-      [self addHandlerForPath:@"/Documents/"];
+    [self addHandlerForPath:@"/Library/"];
+    [self addHandlerForPath:@"/Documents/"];
+    [self addHandlerForPath:@"/tmp/"];
 
-      // Initialize Server startup
-      if (startWebServer) {
-          [self startServer];
-      }
+    // Initialize Server startup
+    if (startWebServer) {
+      [self startServer];
+      [myMainViewController copyLS:_webServer.port];
     }
 
     // Update Swizzled ViewController with port currently used by local Server
@@ -72,7 +72,7 @@ NSString* appDataFolder;
 
 - (void)addHandlerForPath:(NSString *) path {
   [_webServer addHandlerForMethod:@"GET"
-                        pathRegex:[@".*" stringByAppendingString:path]
+                     pathRegex: [NSString stringWithFormat:@"^%@.*", path]
                      requestClass:[GCDWebServerRequest class]
                      processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
                        NSString *fileLocation = request.URL.path;
@@ -114,10 +114,22 @@ NSString* appDataFolder;
     [_webServerOptions setObject:[NSNumber numberWithBool:YES]
                           forKey:GCDWebServerOption_BindToLocalhost];
 
-    // Initialize Server listening port, initially trying 12344 for backwards compatibility
+    // If a fixed port is passed in, use that one, otherwise use 12344.
+    // If the port is taken though, look for a free port by adding 1 to the port until we find one.
     int httpPort = 12344;
 
-    // Start Server
+    // first we check any passed-in variable during plugin install (which is copied to plist, see plugin.xml)
+    NSNumber *plistPort = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"WKWebViewPluginEmbeddedServerPort"];
+    if (plistPort != nil) {
+      httpPort = [plistPort intValue];
+    }
+
+    // now check if it was set in config.xml - this one wins if set.
+    // (note that the settings can be in any casing, but they are stored in lowercase)
+    if ([self.viewController.settings objectForKey:@"wkwebviewpluginembeddedserverport"]) {
+      httpPort = [[self.viewController.settings objectForKey:@"wkwebviewpluginembeddedserverport"] intValue];
+    }
+
     do {
         [_webServerOptions setObject:[NSNumber numberWithInteger:httpPort++]
                               forKey:GCDWebServerOption_Port];
